@@ -3,21 +3,25 @@ import requests
 from collections import OrderedDict
 
 from bs4 import BeautifulSoup
-from lxml.etree import ElementTree, Element
+from lxml.etree import ElementTree, Element, SubElement, tostring
 
+BASE_NAMESPACE = 'http://www.sitemaps.org/schemas/sitemap/0.9'
+IMAGE_NAMESPACE = 'http://www.google.com/schemas/sitemap-image/1.1'
 
 def case_ins_match(pattern):
     return lambda x: x and x.lower() == pattern.lower()
 
 
 class WebPage:
-    def __init__(self, html, html_parser='lxml'):
-        self.soup = BeautifulSoup(html, html_parser)
-
-    @classmethod
-    def from_url(cls, url, html_parser='lxml'):
+    def __init__(self, url):
+        self.url = url
         r = requests.get(url)
-        return cls(html=r.text.encode('utf-8'), html_parser=html_parser)
+        html = r.text.encode('utf-8')
+        self.soup = BeautifulSoup(html, 'lxml')
+
+    @property
+    def images(self):
+        return self.soup.find_all('img')
 
     @property
     def robots(self):
@@ -41,17 +45,21 @@ class WebPage:
 
 
 class SiteMap:
-    def __init__(self, url, include_images=False, include_videos=False):
+    def __init__(self,
+                 url,
+                 exclude=[],
+                 include_images=True,
+                 ignore_noindex=False):
         self.url = url
+        self.exclude = []
+        self.include_images = include_images
+        self.ignore_noindex = ignore_noindex
         nsmap = OrderedDict()
-        nsmap[None] = 'http://www.sitemaps.org/schemas/sitemap/0.9'
+        nsmap[None] = BASE_NAMESPACE
         if include_images:
-            nsmap['image'] = 'http://www.google.com/schemas/sitemap-image/1.1'
-        if include_videos:
-            nsmap['video'] = 'http://www.google.com/schemas/sitemap-video/1.1'
-        root = Element('urlset', nsmap=nsmap)
-        self.xmltree = ElementTree(root)
-        self.soup = None
+            nsmap['image'] = IMAGE_NAMESPACE 
+        self.root = Element('urlset', nsmap=nsmap)
+        self.xmltree = ElementTree(self.root)
 
     def write_xml(
             self,
@@ -67,3 +75,37 @@ class SiteMap:
             xml_declaration=True,
             **kwargs
         )
+
+    def excluded(self, url):
+        for pattern in self.exclude:
+            if pattern in url:
+                return True
+        return False
+
+    def build_xmltree(self):
+        def add_page(page):
+            if not self.ignore_noindex and page.noindex:
+                return
+            url_elem = SubElement(self.root, 'url')
+            loc = SubElement(url_elem, 'loc')
+            loc.text = page.url
+            if self.include_images:
+                for image in page.images:
+                    src = image.get('src')
+                    if src and not self.excluded(src):
+                        img_elem = SubElement(
+                            url_elem,
+                            '{{{}}}image'.format(IMAGE_NAMESPACE)
+                        )
+                        img_loc = SubElement(
+                            img_elem,
+                            '{{{}}}loc'.format(IMAGE_NAMESPACE)
+                        )
+                        img_loc.text = src
+                        # TODO: image caption
+
+        top = WebPage(self.url)
+        add_page(top)
+
+    def tostring(self, *args, **kwargs):
+        return tostring(self.xmltree, *args, **kwargs)
