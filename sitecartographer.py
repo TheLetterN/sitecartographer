@@ -29,17 +29,36 @@ crawled = Queue()
 scraped = Queue()
 
 
-def clean_url(url):
-    if url and url[0] != '#':
-        url = url.split('#')[0]  # We don't want fragments!
-    if BASE_URL in url:
-        return url
-    elif url and url[0]  == '/':
-        return urljoin(BASE_URL, url)
+def remove_url_fragment(url):
+    """Remove fragment from the end of a url if present."""
+    return url.split('#')[0]
+
+
+def normalize_protocol(url, protocol):
+    """Convert http/https URLs to desired protocol if present."""
+    if '://' not in url:
+        raise ValueError('No protocol specified in url: {}'.format(url))
+    protocol = protocol.replace('://', '').lower()
+    if protocol != 'http' and protocol != 'https':
+        raise ValueError('Protocol must be "http" or "https".')
+    if url.startswith('https:'):
+        if protocol == 'http':
+            url = url.replace('https', 'http', 1)
+    elif url.startswith('http:'):
+        if protocol == 'https':
+            url = url.replace('http', 'https', 1)
     else:
-        raise ValueError(
-            '"{}" does not appear to be a crawlable url!'.format(url)
-        )
+        raise ValueError('No valid protocol in url: {}'.format(url))
+    return url
+
+
+def normalize_url(url, base_url):
+    """Attach base_url to url if not already present."""
+    url = remove_url_fragment(url)
+    if url[:len(base_url)] == base_url:
+        return url
+    else:
+        return urljoin(base_url, url)
 
 
 # Begin move to main
